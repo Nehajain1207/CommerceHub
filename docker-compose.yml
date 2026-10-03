@@ -1,0 +1,17 @@
+# Starts the database CommerceHub needs. Run:  docker compose up -d
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: commercehub_postgres
+    environment:
+      POSTGRES_DB: commercehub
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5435:5432"      # 5435 on your computer, so it does not clash with other projects
+    volumes:
+      - commercehub_data:/var/lib/postgresql/data
+
+volumes:
+  commercehub_data:
