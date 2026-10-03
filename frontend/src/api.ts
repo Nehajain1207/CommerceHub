@@ -2,9 +2,11 @@ import type {
   AuthResponse,
   Cart,
   Category,
+  CheckoutResult,
   Order,
   OrderStatus,
   Page,
+  PaymentInfo,
   Product,
   ProductForm,
 } from "./types";
@@ -125,7 +127,18 @@ export const api = {
   removeFromCart: (productId: number) => request<Cart>("DELETE", `/api/cart/items/${productId}`),
 
   // ----- orders -----
-  placeOrder: (shippingAddress: string) => request<Order>("POST", "/api/orders", { shippingAddress }),
+  checkout: (shippingAddress: string) =>
+    request<CheckoutResult>("POST", "/api/checkout", { shippingAddress }),
+  paymentInfo: (orderNumber: string) =>
+    request<PaymentInfo>("GET", `/api/orders/${orderNumber}/payment`),
+  verifyPayment: (orderNumber: string, gatewayOrderId: string, gatewayPaymentId: string, signature: string) =>
+    request<{ paid: boolean }>("POST", `/api/orders/${orderNumber}/payment/verify`, {
+      gatewayOrderId,
+      gatewayPaymentId,
+      signature,
+    }),
+  demoConfirmPayment: (orderNumber: string) =>
+    request<{ paid: boolean }>("POST", `/api/orders/${orderNumber}/payment/demo-confirm`),
   myOrders: () => request<Order[]>("GET", "/api/orders"),
   cancelOrder: (orderNumber: string) => request<Order>("POST", `/api/orders/${orderNumber}/cancel`),
 

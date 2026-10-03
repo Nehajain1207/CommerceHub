@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,6 +18,9 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     Optional<Order> findByOrderNumber(String orderNumber);
 
     Page<Order> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    /** Unpaid orders created before the given time: these are cancelled so their stock is freed. */
+    List<Order> findByStatusAndCreatedAtBefore(OrderStatus status, LocalDateTime createdBefore);
 
     /**
      * Moves an order from one status to another, but only if it is still in the

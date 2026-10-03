@@ -1,15 +1,41 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api, formatDate, formatPrice } from "../api";
-import type { Order } from "../types";
+import type { Order, OrderStatus } from "../types";
+import { useSession } from "../session";
+import { payForOrder } from "../payment";
 import Notice from "../components/Notice";
+
+/** The words a customer sees for each order status. */
+export const STATUS_LABEL: Record<OrderStatus, string> = {
+  PENDING_PAYMENT: "Awaiting payment",
+  PLACED: "Paid",
+  SHIPPED: "Shipped",
+  DELIVERED: "Delivered",
+  CANCELLED: "Cancelled",
+};
+
+interface ArrivalState {
+  paid?: string;
+  unpaid?: string;
+  problem?: string;
+}
 
 export default function OrdersPage() {
   const location = useLocation();
-  const placed = (location.state as { placed?: string } | null)?.placed;
+  const arrival = (location.state as ArrivalState | null) ?? {};
+  const { user } = useSession();
 
   const [orders, setOrders] = useState<Order[] | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(arrival.problem ?? "");
+  const [message, setMessage] = useState(
+    arrival.paid
+      ? `Payment received. Order ${arrival.paid} is confirmed.`
+      : arrival.unpaid && !arrival.problem
+        ? `Order ${arrival.unpaid} is waiting for payment. Pay within 15 minutes to keep it.`
+        : "",
+  );
+  const [busyOrder, setBusyOrder] = useState("");
 
   function load() {
     api
@@ -20,13 +46,38 @@ export default function OrdersPage() {
 
   useEffect(load, []);
 
-  async function cancel(orderNumber: string) {
+  async function pay(orderNumber: string) {
     setError("");
+    setMessage("");
+    setBusyOrder(orderNumber);
+
     try {
-      await api.cancelOrder(orderNumber);
-      load();
+      const payment = await api.paymentInfo(orderNumber);
+      const outcome = await payForOrder(orderNumber, payment, {
+        name: user?.name ?? "",
+        email: user?.email ?? "",
+      });
+      if (outcome === "paid") {
+        setMessage(`Payment received. Order ${orderNumber} is confirmed.`);
+      }
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setBusyOrder("");
+      load();
+    }
+  }
+
+  async function cancel(orderNumber: string) {
+    setError("");
+    setMessage("");
+    try {
+      await api.cancelOrder(orderNumber);
+      setMessage(`Order ${orderNumber} cancelled.`);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      load();
     }
   }
 
@@ -34,7 +85,7 @@ export default function OrdersPage() {
     <div className="orders">
       <h1>My orders</h1>
 
-      {placed && <Notice kind="success">{`Order ${placed} placed.`}</Notice>}
+      {message && <Notice kind="success">{message}</Notice>}
       {error && <Notice kind="error">{error}</Notice>}
 
       {orders && orders.length === 0 && (
@@ -52,7 +103,7 @@ export default function OrdersPage() {
                 <p className="muted">Placed {formatDate(order.createdAt)}</p>
               </div>
               <span className={`status status-${order.status.toLowerCase()}`}>
-                {order.status.charAt(0) + order.status.slice(1).toLowerCase()}
+                {STATUS_LABEL[order.status]}
               </span>
             </div>
 
@@ -72,10 +123,20 @@ export default function OrdersPage() {
               <strong>{formatPrice(order.total)}</strong>
             </div>
 
-            {order.status === "PLACED" && (
-              <button type="button" className="link-button" onClick={() => cancel(order.orderNumber)}>
-                Cancel order
-              </button>
+            {order.status === "PENDING_PAYMENT" && (
+              <div className="order-actions">
+                <button
+                  type="button"
+                  className="button button-small"
+                  disabled={busyOrder === order.orderNumber}
+                  onClick={() => pay(order.orderNumber)}
+                >
+                  {busyOrder === order.orderNumber ? "Please wait…" : "Pay now"}
+                </button>
+                <button type="button" className="link-button" onClick={() => cancel(order.orderNumber)}>
+                  Cancel order
+                </button>
+              </div>
             )}
           </li>
         ))}

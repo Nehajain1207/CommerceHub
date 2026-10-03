@@ -59,6 +59,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/products/**", "/api/categories/**").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
 
+                        // Called by the payment gateway's servers; protected by a signature check instead of a login
+                        .requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
+
                         // Only admins can manage the shop
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, formatDate, formatPrice } from "../api";
 import type { Order, OrderStatus, Page } from "../types";
 import Notice from "../components/Notice";
+import { STATUS_LABEL } from "./OrdersPage";
 
 /** The next step an admin can take for an order in each status. */
 const NEXT_STEP: Partial<Record<OrderStatus, { status: OrderStatus; label: string }>> = {
@@ -77,7 +78,7 @@ export default function AdminOrdersPage() {
                     <td className="num">{formatPrice(order.total)}</td>
                     <td>
                       <span className={`status status-${order.status.toLowerCase()}`}>
-                        {order.status.charAt(0) + order.status.slice(1).toLowerCase()}
+                        {STATUS_LABEL[order.status]}
                       </span>
                     </td>
                     <td>
@@ -90,7 +91,7 @@ export default function AdminOrdersPage() {
                           {next.label}
                         </button>
                       )}
-                      {order.status === "PLACED" && (
+                      {order.status === "PENDING_PAYMENT" && (
                         <button
                           type="button"
                           className="link-button"

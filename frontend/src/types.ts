@@ -49,7 +49,7 @@ export interface Cart {
   total: number;
 }
 
-export type OrderStatus = "PLACED" | "SHIPPED" | "DELIVERED" | "CANCELLED";
+export type OrderStatus = "PENDING_PAYMENT" | "PLACED" | "SHIPPED" | "DELIVERED" | "CANCELLED";
 
 export interface OrderLine {
   productId: number;
@@ -78,4 +78,18 @@ export interface ProductForm {
   stock: number;
   categoryId: number;
   active: boolean;
+}
+
+/** What the browser needs to open the payment window for an order. */
+export interface PaymentInfo {
+  gatewayOrderId: string;
+  amountPaise: number;
+  currency: string;
+  publicKey: string;
+  demo: boolean;
+}
+
+export interface CheckoutResult {
+  order: Order;
+  payment: PaymentInfo;
 }

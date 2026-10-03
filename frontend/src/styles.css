@@ -323,8 +323,12 @@ textarea {
   white-space: nowrap;
 }
 
-.status-placed {
+.status-pending_payment {
   color: var(--marigold-deep);
+}
+
+.status-placed {
+  color: var(--ok);
 }
 
 .status-shipped {
@@ -799,6 +803,12 @@ textarea {
 
 .order-foot {
   margin-bottom: 12px;
+}
+
+.order-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
 }
 
 .order-foot strong {

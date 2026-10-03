@@ -59,7 +59,7 @@ public class Order {
         this.orderNumber = orderNumber;
         this.user = user;
         this.shippingAddress = shippingAddress;
-        this.status = OrderStatus.PLACED;
+        this.status = OrderStatus.PENDING_PAYMENT;
         this.total = BigDecimal.ZERO;
         this.createdAt = LocalDateTime.now();
     }

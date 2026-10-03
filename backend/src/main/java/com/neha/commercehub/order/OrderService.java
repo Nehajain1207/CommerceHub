@@ -16,6 +16,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
@@ -104,15 +105,57 @@ public class OrderService {
         return toResponse(findOwnOrder(email, orderNumber));
     }
 
-    /** A customer can cancel only their own order, and only before it has shipped. */
+    /**
+     * A customer can cancel their own order only while it is still unpaid.
+     * (Cancelling a paid order would need a refund, which is not built yet.)
+     */
     @Transactional
     public OrderResponse cancelMyOrder(String email, String orderNumber) {
 
         Order order = findOwnOrder(email, orderNumber);
 
-        cancel(order);
+        cancelUnpaid(order);
 
         return toResponse(order, OrderStatus.CANCELLED);
+    }
+
+    /** Used by the payment code: looks an order up and checks it belongs to this customer. */
+    @Transactional(readOnly = true)
+    public Order requireOwnOrder(String email, String orderNumber) {
+        return findOwnOrder(email, orderNumber);
+    }
+
+    /**
+     * Marks an unpaid order as paid. Returns true if THIS call made the change and
+     * false if the order was already paid, so a repeated confirmation is harmless.
+     */
+    @Transactional
+    public boolean markPaid(Long orderId) {
+        return orderRepository.changeStatus(orderId, OrderStatus.PENDING_PAYMENT, OrderStatus.PLACED) == 1;
+    }
+
+    /** Cancels an unpaid order and gives its stock back. Returns false if it was no longer unpaid. */
+    @Transactional
+    public boolean cancelUnpaidById(Long orderId) {
+
+        Order order = orderRepository.findById(orderId).orElse(null);
+
+        if (order == null
+                || orderRepository.changeStatus(orderId, OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED) == 0) {
+            return false;
+        }
+
+        releaseStock(order);
+        return true;
+    }
+
+    /** Ids of orders that have waited for payment longer than allowed. */
+    @Transactional(readOnly = true)
+    public List<Long> unpaidOrderIdsOlderThan(LocalDateTime createdBefore) {
+
+        return orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.PENDING_PAYMENT, createdBefore).stream()
+                .map(Order::getId)
+                .toList();
     }
 
     // ---------- admin ----------
@@ -127,7 +170,7 @@ public class OrderService {
                 OrderService::toResponse);
     }
 
-    /** Allowed moves: PLACED to SHIPPED, SHIPPED to DELIVERED, PLACED to CANCELLED. */
+    /** Allowed moves: PLACED to SHIPPED, SHIPPED to DELIVERED, and unpaid to CANCELLED. */
     @Transactional
     public OrderResponse changeStatus(String orderNumber, OrderStatus newStatus) {
 
@@ -136,7 +179,7 @@ public class OrderService {
 
         if (newStatus == OrderStatus.CANCELLED) {
 
-            cancel(order);
+            cancelUnpaid(order);
 
         } else {
 
@@ -144,7 +187,7 @@ public class OrderService {
 
             if (orderRepository.changeStatus(order.getId(), required, newStatus) == 0) {
                 throw new BadRequestException(
-                        "Order is " + order.getStatus() + " and cannot be moved to " + newStatus + ".");
+                        "Order is " + label(order.getStatus()) + " and cannot be moved to " + label(newStatus) + ".");
             }
         }
 
@@ -153,16 +196,25 @@ public class OrderService {
 
     // ---------- helpers ----------
 
-    private void cancel(Order order) {
+    private void cancelUnpaid(Order order) {
 
-        // Only the request that actually flips PLACED to CANCELLED gives the stock back
-        if (orderRepository.changeStatus(order.getId(), OrderStatus.PLACED, OrderStatus.CANCELLED) == 0) {
-            throw new BadRequestException("Only orders that have not shipped can be cancelled.");
+        // Only the request that actually flips the status gives the stock back
+        if (orderRepository.changeStatus(order.getId(), OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED) == 0) {
+            throw new BadRequestException("Only orders that are still waiting for payment can be cancelled.");
         }
+
+        releaseStock(order);
+    }
+
+    private void releaseStock(Order order) {
 
         for (OrderItem item : order.getItems()) {
             productRepository.releaseStock(item.getProduct().getId(), item.getQuantity());
         }
+    }
+
+    private static String label(OrderStatus status) {
+        return status.name().toLowerCase().replace('_', ' ');
     }
 
     private static OrderStatus requiredCurrentStatus(OrderStatus newStatus) {
@@ -173,7 +225,7 @@ public class OrderService {
         if (newStatus == OrderStatus.DELIVERED) {
             return OrderStatus.SHIPPED;
         }
-        throw new BadRequestException("An order cannot be moved back to " + newStatus + ".");
+        throw new BadRequestException("An order cannot be moved to " + label(newStatus) + " by hand.");
     }
 
     private Order findOwnOrder(String email, String orderNumber) {
@@ -193,7 +245,7 @@ public class OrderService {
         return "CH-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
-    private static OrderResponse toResponse(Order order) {
+    public static OrderResponse toResponse(Order order) {
         return toResponse(order, order.getStatus());
     }
 

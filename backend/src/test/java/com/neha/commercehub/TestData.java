@@ -7,6 +7,8 @@ import com.neha.commercehub.catalog.CategoryRepository;
 import com.neha.commercehub.catalog.Product;
 import com.neha.commercehub.catalog.ProductRepository;
 import com.neha.commercehub.order.OrderRepository;
+import com.neha.commercehub.order.OrderService;
+import com.neha.commercehub.payment.PaymentRepository;
 import com.neha.commercehub.user.Role;
 import com.neha.commercehub.user.User;
 import com.neha.commercehub.user.UserRepository;
@@ -35,8 +37,15 @@ public class TestData {
     @Autowired
     private OrderRepository orderRepository;
 
+    @Autowired
+    private PaymentRepository paymentRepository;
+
+    @Autowired
+    private OrderService orderService;
+
     /** Empties every table, in an order that respects the links between them. */
     public void clear() {
+        paymentRepository.deleteAll();
         orderRepository.deleteAll();
         cartItemRepository.deleteAll();
         productRepository.deleteAll();
@@ -68,5 +77,15 @@ public class TestData {
 
     public int stockOf(Product product) {
         return productRepository.currentStock(product.getId());
+    }
+
+    /** Marks an order as paid directly, for tests that are about what happens after payment. */
+    public void pay(String orderNumber) {
+        Long orderId = orderRepository.findByOrderNumber(orderNumber).orElseThrow().getId();
+        orderService.markPaid(orderId);
+    }
+
+    public String statusOf(String orderNumber) {
+        return orderRepository.findByOrderNumber(orderNumber).orElseThrow().getStatus().name();
     }
 }

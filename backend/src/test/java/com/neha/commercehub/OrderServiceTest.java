@@ -55,7 +55,7 @@ class OrderServiceTest {
 
         OrderResponse order = orderService.checkout(user.getEmail(), ADDRESS);
 
-        assertEquals("PLACED", order.status());
+        assertEquals("PENDING_PAYMENT", order.status());
         assertEquals(2, order.items().size());
         assertEquals(0, new BigDecimal("2600.00").compareTo(order.total()));
         assertTrue(order.orderNumber().startsWith("CH-"));
@@ -150,18 +150,19 @@ class OrderServiceTest {
     }
 
     @Test
-    void cancel_isRefusedOnceTheOrderHasShipped() {
+    void cancel_isRefusedOnceTheOrderIsPaid() {
 
         User user = data.customer();
         Product bottle = data.product("Bottle", "750.00", 10);
         data.addToCart(user, bottle, 1);
         OrderResponse order = orderService.checkout(user.getEmail(), ADDRESS);
 
-        orderService.changeStatus(order.orderNumber(), OrderStatus.SHIPPED);
+        data.pay(order.orderNumber());
 
         assertThrows(BadRequestException.class,
                 () -> orderService.cancelMyOrder(user.getEmail(), order.orderNumber()));
         assertEquals(9, data.stockOf(bottle));
+        assertEquals("PLACED", data.statusOf(order.orderNumber()));
     }
 
     @Test
@@ -181,12 +182,18 @@ class OrderServiceTest {
     }
 
     @Test
-    void status_movesForwardOnly() {
+    void status_movesForwardOnly_andOnlyAfterPayment() {
 
         User user = data.customer();
         Product bottle = data.product("Bottle", "750.00", 10);
         data.addToCart(user, bottle, 1);
         OrderResponse order = orderService.checkout(user.getEmail(), ADDRESS);
+
+        // An unpaid order cannot be shipped
+        assertThrows(BadRequestException.class,
+                () -> orderService.changeStatus(order.orderNumber(), OrderStatus.SHIPPED));
+
+        data.pay(order.orderNumber());
 
         // Cannot jump straight to DELIVERED
         assertThrows(BadRequestException.class,

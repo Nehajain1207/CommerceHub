@@ -5,10 +5,11 @@ import { api, formatPrice } from "../api";
 import type { Cart } from "../types";
 import { useSession } from "../session";
 import Notice from "../components/Notice";
+import { payForOrder } from "../payment";
 
 export default function CartPage() {
   const navigate = useNavigate();
-  const { setCartCount } = useSession();
+  const { user, setCartCount } = useSession();
 
   const [cart, setCart] = useState<Cart | null>(null);
   const [address, setAddress] = useState("");
@@ -42,11 +43,27 @@ export default function CartPage() {
     setBusy(true);
     setError("");
 
+    let orderNumber = "";
+
     try {
-      const order = await api.placeOrder(address);
+      // Step 1: the order is created and the stock is held
+      const result = await api.checkout(address);
+      orderNumber = result.order.orderNumber;
       setCartCount(0);
-      navigate("/orders", { state: { placed: order.orderNumber } });
+
+      // Step 2: pay for it
+      const outcome = await payForOrder(orderNumber, result.payment, {
+        name: user?.name ?? "",
+        email: user?.email ?? "",
+      });
+
+      navigate("/orders", { state: outcome === "paid" ? { paid: orderNumber } : { unpaid: orderNumber } });
     } catch (err) {
+      if (orderNumber) {
+        // The order exists but the payment did not go through: it can be paid from My orders
+        navigate("/orders", { state: { unpaid: orderNumber, problem: (err as Error).message } });
+        return;
+      }
       // Most likely someone else bought the last units first: reload to show current stock
       setError((err as Error).message);
       api.cart().then(show).catch(() => undefined);
@@ -152,9 +169,11 @@ export default function CartPage() {
             />
           </label>
           <button type="submit" className="button button-wide" disabled={busy}>
-            {busy ? "Placing order…" : "Place order"}
+            {busy ? "Please wait…" : "Place order and pay"}
           </button>
-          <p className="fine-print">Stock is reserved when you place the order, not before.</p>
+          <p className="fine-print">
+            Your items are held for 15 minutes while you pay. Unpaid orders are cancelled automatically.
+          </p>
         </form>
       </div>
     </div>
