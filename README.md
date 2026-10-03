@@ -59,6 +59,19 @@ Talking to the payment company is a network call, so it is done outside any data
 
 **Two modes.** With Razorpay test keys set (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`), the real Razorpay payment window opens. Without keys the app runs in demo mode: a confirmation box stands in for the payment window, and the same signature check runs behind it. Both modes have been run: an order was paid through Razorpay's test-mode window and confirmed after signature verification. The webhook is covered by automated tests but has not yet received a live call from Razorpay, because that needs a public address.
 
+## Load test results
+
+Measured on a laptop on 3 Oct 2026 with `loadtest/LoadTest.java`: 200 customers and 400 checkout requests over HTTP against the running back end (demo payment mode).
+
+| Scenario | Result |
+|---|---|
+| **Flash sale** – 200 customers check out a product with 20 units at the same instant | 20 orders placed, 180 told "sold out", stock 0 |
+| **Double cancel** – each of those 20 orders cancelled by two requests at the same instant | 20 cancelled, 20 duplicates refused, stock back to exactly 20 |
+| **Mixed rush** – 200 customers check out 1 to 3 units of a product with 50 units | 32 orders holding 50 units, 50 units gone from stock, stock 0 |
+| Unexpected errors | 0 |
+
+Reproduce it with the back end running: `java loadtest/LoadTest.java`
+
 ## Run it
 
 Needs Java 17+, Node.js 18+ and Docker.
