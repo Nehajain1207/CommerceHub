@@ -93,3 +93,12 @@ export interface CheckoutResult {
   order: Order;
   payment: PaymentInfo;
 }
+
+/** An update about an order, recorded by the notification service from a Kafka event. */
+export interface OrderUpdate {
+  orderNumber: string;
+  type: string;
+  message: string;
+  customerEmail: string;
+  occurredAt: string;
+}

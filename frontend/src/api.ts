@@ -5,6 +5,7 @@ import type {
   CheckoutResult,
   Order,
   OrderStatus,
+  OrderUpdate,
   Page,
   PaymentInfo,
   Product,
@@ -142,6 +143,9 @@ export const api = {
   myOrders: () => request<Order[]>("GET", "/api/orders"),
   cancelOrder: (orderNumber: string) => request<Order>("POST", `/api/orders/${orderNumber}/cancel`),
 
+  // ----- order updates (served by the separate notification service) -----
+  myOrderUpdates: () => request<OrderUpdate[]>("GET", "/notify/api/notifications"),
+
   // ----- admin -----
   adminProducts: (q: string, page: number) =>
     request<Page<Product>>("GET", `/api/admin/products${queryString({ q, page, size: 20 })}`),
@@ -171,5 +175,14 @@ export function formatDate(iso: string): string {
     day: "numeric",
     month: "short",
     year: "numeric",
+  });
+}
+
+export function formatTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }

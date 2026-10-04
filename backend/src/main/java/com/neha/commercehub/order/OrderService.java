@@ -8,6 +8,8 @@ import com.neha.commercehub.common.BadRequestException;
 import com.neha.commercehub.common.InsufficientStockException;
 import com.neha.commercehub.common.NotFoundException;
 import com.neha.commercehub.common.PageResponse;
+import com.neha.commercehub.events.OrderEventType;
+import com.neha.commercehub.events.OutboxWriter;
 import com.neha.commercehub.order.OrderDtos.OrderLine;
 import com.neha.commercehub.order.OrderDtos.OrderResponse;
 import com.neha.commercehub.user.User;
@@ -28,16 +30,19 @@ public class OrderService {
     private final CartItemRepository cartItemRepository;
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
+    private final OutboxWriter outbox;
 
     public OrderService(OrderRepository orderRepository,
                         CartItemRepository cartItemRepository,
                         ProductRepository productRepository,
-                        UserRepository userRepository) {
+                        UserRepository userRepository,
+                        OutboxWriter outbox) {
 
         this.orderRepository = orderRepository;
         this.cartItemRepository = cartItemRepository;
         this.productRepository = productRepository;
         this.userRepository = userRepository;
+        this.outbox = outbox;
     }
 
     /**
@@ -87,6 +92,9 @@ public class OrderService {
 
         Order saved = orderRepository.save(order);
 
+        // Saved in this same transaction: if the order rolls back, so does the event
+        outbox.record(OrderEventType.ORDER_CREATED, saved);
+
         cartItemRepository.deleteByUserId(user.getId());
 
         return toResponse(saved);
@@ -131,7 +139,16 @@ public class OrderService {
      */
     @Transactional
     public boolean markPaid(Long orderId) {
-        return orderRepository.changeStatus(orderId, OrderStatus.PENDING_PAYMENT, OrderStatus.PLACED) == 1;
+
+        if (orderRepository.changeStatus(orderId, OrderStatus.PENDING_PAYMENT, OrderStatus.PLACED) == 0) {
+            return false;
+        }
+
+        // Only the call that actually changed the status announces it, so "paid" is announced once
+        orderRepository.findById(orderId)
+                .ifPresent(order -> outbox.record(OrderEventType.ORDER_PAID, order));
+
+        return true;
     }
 
     /** Cancels an unpaid order and gives its stock back. Returns false if it was no longer unpaid. */
@@ -146,6 +163,7 @@ public class OrderService {
         }
 
         releaseStock(order);
+        outbox.record(OrderEventType.ORDER_CANCELLED, order);
         return true;
     }
 
@@ -189,6 +207,10 @@ public class OrderService {
                 throw new BadRequestException(
                         "Order is " + label(order.getStatus()) + " and cannot be moved to " + label(newStatus) + ".");
             }
+
+            outbox.record(newStatus == OrderStatus.SHIPPED
+                    ? OrderEventType.ORDER_SHIPPED
+                    : OrderEventType.ORDER_DELIVERED, order);
         }
 
         return toResponse(order, newStatus);
@@ -204,6 +226,7 @@ public class OrderService {
         }
 
         releaseStock(order);
+        outbox.record(OrderEventType.ORDER_CANCELLED, order);
     }
 
     private void releaseStock(Order order) {

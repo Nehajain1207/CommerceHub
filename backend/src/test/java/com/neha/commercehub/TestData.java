@@ -6,6 +6,7 @@ import com.neha.commercehub.catalog.Category;
 import com.neha.commercehub.catalog.CategoryRepository;
 import com.neha.commercehub.catalog.Product;
 import com.neha.commercehub.catalog.ProductRepository;
+import com.neha.commercehub.events.OutboxRepository;
 import com.neha.commercehub.order.OrderRepository;
 import com.neha.commercehub.order.OrderService;
 import com.neha.commercehub.payment.PaymentRepository;
@@ -41,10 +42,14 @@ public class TestData {
     private PaymentRepository paymentRepository;
 
     @Autowired
+    private OutboxRepository outboxRepository;
+
+    @Autowired
     private OrderService orderService;
 
     /** Empties every table, in an order that respects the links between them. */
     public void clear() {
+        outboxRepository.deleteAll();
         paymentRepository.deleteAll();
         orderRepository.deleteAll();
         cartItemRepository.deleteAll();

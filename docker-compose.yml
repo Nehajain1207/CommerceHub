@@ -1,6 +1,7 @@
-# Starts the database CommerceHub needs. Run:  docker compose up -d
+# Starts everything CommerceHub needs besides the code itself. Run:  docker compose up -d
 services:
 
+  # The shop's database
   postgres:
     image: postgres:16
     container_name: commercehub_postgres
@@ -13,5 +14,27 @@ services:
     volumes:
       - commercehub_data:/var/lib/postgresql/data
 
+  # The notification service's own database. Each service owns its data.
+  notifications-db:
+    image: postgres:16
+    container_name: commercehub_notifications_db
+    environment:
+      POSTGRES_DB: notifications
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5436:5432"
+    volumes:
+      - notifications_data:/var/lib/postgresql/data
+
+  # Kafka: carries order events from the shop to the notification service.
+  # A single broker in KRaft mode (no ZooKeeper), enough for local development.
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: commercehub_kafka
+    ports:
+      - "9092:9092"
+
 volumes:
   commercehub_data:
+  notifications_data:

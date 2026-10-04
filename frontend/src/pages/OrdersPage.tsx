@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { api, formatDate, formatPrice } from "../api";
-import type { Order, OrderStatus } from "../types";
+import { api, formatDate, formatPrice, formatTime } from "../api";
+import type { Order, OrderStatus, OrderUpdate } from "../types";
 import { useSession } from "../session";
 import { payForOrder } from "../payment";
 import Notice from "../components/Notice";
@@ -36,12 +36,24 @@ export default function OrdersPage() {
         : "",
   );
   const [busyOrder, setBusyOrder] = useState("");
+  const [updates, setUpdates] = useState<OrderUpdate[]>([]);
 
   function load() {
     api
       .myOrders()
       .then(setOrders)
       .catch((err: Error) => setError(err.message));
+
+    // Updates come from a separate service through Kafka, so they can lag a moment
+    // behind, and the page must still work if that service is not running.
+    const fetchUpdates = () =>
+      api
+        .myOrderUpdates()
+        .then(setUpdates)
+        .catch(() => undefined);
+
+    void fetchUpdates();
+    setTimeout(fetchUpdates, 2500);
   }
 
   useEffect(load, []);
@@ -122,6 +134,19 @@ export default function OrdersPage() {
               <span className="muted">Deliver to: {order.shippingAddress}</span>
               <strong>{formatPrice(order.total)}</strong>
             </div>
+
+            {updates.some((update) => update.orderNumber === order.orderNumber) && (
+              <ol className="timeline" aria-label={`Updates for order ${order.orderNumber}`}>
+                {updates
+                  .filter((update) => update.orderNumber === order.orderNumber)
+                  .map((update) => (
+                    <li key={update.type + update.occurredAt}>
+                      <span>{update.message}</span>
+                      <time dateTime={update.occurredAt}>{formatTime(update.occurredAt)}</time>
+                    </li>
+                  ))}
+              </ol>
+            )}
 
             {order.status === "PENDING_PAYMENT" && (
               <div className="order-actions">

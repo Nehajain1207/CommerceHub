@@ -4,9 +4,9 @@ A small online store, front end and back end: customers browse products, fill a 
 
 It is built around one problem: **when only a few units are left and many people order at the same moment, the shop must never sell more than it has.**
 
-React + TypeScript (Vite) · Java 17 · Spring Boot 3.5 · PostgreSQL · Spring Security (JWT) · Docker
+React + TypeScript (Vite) · Java 17 · Spring Boot 3.5 · PostgreSQL · Kafka · Spring Security (JWT) · Docker
 
-> Phases 1 and 2 are built (store, then payments). Planned next: order events with Kafka, a load test, Kubernetes.
+> Phases 1 to 3 are built (store, payments, order events with Kafka). Planned next: Kubernetes.
 
 ## What it does
 
@@ -59,6 +59,28 @@ Talking to the payment company is a network call, so it is done outside any data
 
 **Two modes.** With Razorpay test keys set (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`), the real Razorpay payment window opens. Without keys the app runs in demo mode: a confirmation box stands in for the payment window, and the same signature check runs behind it. Both modes have been run: an order was paid through Razorpay's test-mode window and confirmed after signature verification. The webhook is covered by automated tests but has not yet received a live call from Razorpay, because that needs a public address.
 
+## Order events with Kafka
+
+When an order is created, paid, shipped, delivered or cancelled, the shop publishes an event. A separate program, the **notification service**, listens and records an update for the customer, which the shop shows as the order's timeline. The two programs share nothing but the Kafka topic: the notification service has its own database and never reads the shop's tables.
+
+```
+shop back end ── writes order + event in ONE transaction ──> outbox table
+                                                               │  (every second)
+                                                               ▼
+                                                            Kafka topic
+                                                               │
+                                                               ▼
+                                              notification service ──> its own database
+```
+
+Two problems this design deals with:
+
+**An event must never be lost.** Saving an order and sending a Kafka message are two different systems; if the app saved the order and crashed before sending, the event would be gone. So the event is first written to an `outbox_events` table in the same database transaction as the order change: both are saved or neither is. A background job sends outbox rows to Kafka, waits for Kafka's acknowledgement, and only then marks them sent. If Kafka is down, the events wait in the table and go out when it is back, in their original order. (This is the outbox pattern.)
+
+**An event may arrive twice.** If the app stops after Kafka acknowledged but before the row was marked sent, that event is sent again. Delivery is therefore at-least-once, and the notification service is written to be safe to repeat: every event carries a unique id, the `notifications` table has a unique rule on it, and a repeat is recognised and skipped.
+
+**Checked by hand (4 Oct 2026).** With all three programs running, an order's "placed" and "paid" updates appeared on its timeline within seconds. Then Kafka was stopped: a new order was still placed and paid normally, with no timeline. After Kafka was started again, that order's two updates appeared, in the right order. The same behaviour is covered by automated tests using a stand-in for Kafka.
+
 ## Load test results
 
 Measured on a laptop on 3 Oct 2026 with `loadtest/LoadTest.java`: 200 customers and 400 checkout requests over HTTP against the running back end (demo payment mode).
@@ -77,14 +99,18 @@ Reproduce it with the back end running: `java loadtest/LoadTest.java`
 Needs Java 17+, Node.js 18+ and Docker.
 
 ```bash
-# 1. database
+# 1. databases and Kafka
 docker compose up -d
 
 # 2. back end  (http://localhost:8090)
 cd backend
 ./mvnw spring-boot:run            # Windows: mvnw.cmd spring-boot:run
 
-# 3. front end (http://localhost:5173), in a second terminal
+# 3. notification service (http://localhost:8091), in a second terminal
+cd notification-service
+./mvnw spring-boot:run
+
+# 4. front end (http://localhost:5173), in a third terminal
 cd frontend
 npm install
 npm run dev
@@ -102,11 +128,11 @@ API documentation: http://localhost:8090/swagger-ui.html
 ## Tests
 
 ```bash
-cd backend
-./mvnw test
+cd backend && ./mvnw test
+cd notification-service && ./mvnw test
 ```
 
-The tests use an in-memory database, so they need no Docker. They cover checkout, payment (genuine and forged signatures, webhooks, repeated confirmations, unpaid orders timing out, late payments), cancellation, order status rules, sign-up and login, product management and the cart, plus one concurrency test: 50 customers check out at the same instant for a product with 5 units, and exactly 5 orders must succeed.
+The tests use an in-memory database and no Kafka, so they need no Docker. They cover checkout, payment (genuine and forged signatures, webhooks, repeated confirmations, unpaid orders timing out, late payments), cancellation, order status rules, sign-up and login, product management and the cart, plus one concurrency test: 50 customers check out at the same instant for a product with 5 units, and exactly 5 orders must succeed.
 
 ## Project layout
 
@@ -118,7 +144,9 @@ backend/    Spring Boot API
   cart/       the customer's cart
   order/      orders, cancellation, order status
   payment/    checkout, payment gateway, signature checks, webhook
+  events/     order events, the outbox table and the Kafka publisher
   common/     error handling shared by all of the above
+notification-service/   second Spring Boot program: Kafka listener, its own database
 frontend/   React app
   src/api.ts        every call to the back end
   src/session.tsx   who is logged in, cart count
@@ -144,6 +172,8 @@ No secrets are stored in the code. The defaults are for local development only.
 - Razorpay is used in test mode only; no real money moves.
 - The webhook is tested with simulated notifications, not live ones from Razorpay.
 - A paid order cannot be cancelled, because refunds are not built yet.
+- The notification service records updates but does not send real emails or SMS.
+- Kafka runs as a single local broker; there is no cluster, and no dead-letter topic for events that cannot be read (they are logged and skipped).
 - Products have no images yet.
 - The demo accounts and sample data are for local development and should be switched off (`app.seed.enabled=false`) anywhere else.
 

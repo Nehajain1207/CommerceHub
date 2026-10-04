@@ -805,6 +805,46 @@ textarea {
   margin-bottom: 12px;
 }
 
+/* Order updates: a real sequence in time, so it is drawn as one */
+.timeline {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0 0 0 16px;
+  border-left: 2px solid var(--line);
+  display: grid;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.timeline li {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.timeline li::before {
+  content: "";
+  position: absolute;
+  left: -22px;
+  top: 6px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 2px solid var(--ink-soft);
+}
+
+.timeline li:last-child::before {
+  background: var(--marigold);
+  border-color: var(--marigold-deep);
+}
+
+.timeline time {
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
 .order-actions {
   display: flex;
   align-items: center;
