@@ -180,3 +180,16 @@ No secrets are stored in the code. The defaults are for local development only.
 ## Author
 
 Neha Jain
+## Database migrations (Flyway)
+
+The database schema is managed with Flyway, not created by Hibernate.
+
+- Shop back end: backend/src/main/resources/db/migration
+  - V1__initial_schema.sql: all tables (users, products, cart, orders, payments, outbox)
+  - V2__indexes_for_common_queries.sql: indexes for order history, order status and unpublished outbox events
+- Notification service: notification-service/src/main/resources/db/migration
+  - V1__initial_schema.sql: notifications table
+
+Both services run with spring.jpa.hibernate.ddl-auto=validate, so the app refuses to start if the Java entities and the tables ever disagree.
+
+Checked by hand (14 Oct 2026): fresh databases built by Flyway, both services started, and an order placed end to end with its timeline delivered over Kafka.
