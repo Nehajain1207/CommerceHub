@@ -7,6 +7,8 @@ import com.neha.commercehub.catalog.CatalogDtos.ProductResponse;
 import com.neha.commercehub.common.BadRequestException;
 import com.neha.commercehub.common.NotFoundException;
 import com.neha.commercehub.common.PageResponse;
+import com.neha.commercehub.scaling.CatalogCache;
+import com.neha.commercehub.scaling.StockGate;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -22,10 +24,18 @@ public class ProductService {
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
+    private final CatalogCache catalogCache;
+    private final StockGate stockGate;
 
-    public ProductService(ProductRepository productRepository, CategoryRepository categoryRepository) {
+    public ProductService(ProductRepository productRepository,
+                          CategoryRepository categoryRepository,
+                          CatalogCache catalogCache,
+                          StockGate stockGate) {
+
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
+        this.catalogCache = catalogCache;
+        this.stockGate = stockGate;
     }
 
     // ---------- shop ----------
@@ -95,6 +105,7 @@ public class ProductService {
 
         product.setActive(request.active());
 
+        catalogCache.invalidateAfterCommit();
         return toResponse(productRepository.save(product));
     }
 
@@ -116,6 +127,7 @@ public class ProductService {
         product.setCategory(findCategory(request.categoryId()));
         product.setActive(request.active());
 
+        catalogCache.invalidateAfterCommit();
         return toResponse(product);
     }
 
@@ -127,6 +139,9 @@ public class ProductService {
         if (productRepository.adjustStock(id, delta) == 0) {
             throw new BadRequestException("Stock cannot go below zero.");
         }
+
+        catalogCache.invalidateAfterCommit();
+        stockGate.forgetAfterCommit(id);
 
         return new ProductResponse(
                 product.getId(),
@@ -144,6 +159,7 @@ public class ProductService {
     @Transactional
     public void deactivate(Long id) {
         find(id).setActive(false);
+        catalogCache.invalidateAfterCommit();
     }
 
     @Transactional(readOnly = true)
@@ -164,6 +180,7 @@ public class ProductService {
         }
 
         Category saved = categoryRepository.save(new Category(name));
+        catalogCache.invalidateAfterCommit();
         return new CategoryResponse(saved.getId(), saved.getName());
     }
 

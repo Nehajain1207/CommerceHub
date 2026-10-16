@@ -12,6 +12,7 @@ import com.neha.commercehub.events.OrderEventType;
 import com.neha.commercehub.events.OutboxWriter;
 import com.neha.commercehub.order.OrderDtos.OrderLine;
 import com.neha.commercehub.order.OrderDtos.OrderResponse;
+import com.neha.commercehub.scaling.StockGate;
 import com.neha.commercehub.user.User;
 import com.neha.commercehub.user.UserRepository;
 import org.springframework.data.domain.PageRequest;
@@ -31,18 +32,34 @@ public class OrderService {
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
     private final OutboxWriter outbox;
+    private final StockGate stockGate;
 
     public OrderService(OrderRepository orderRepository,
                         CartItemRepository cartItemRepository,
                         ProductRepository productRepository,
                         UserRepository userRepository,
-                        OutboxWriter outbox) {
+                        OutboxWriter outbox,
+                        StockGate stockGate) {
 
         this.orderRepository = orderRepository;
         this.cartItemRepository = cartItemRepository;
         this.productRepository = productRepository;
         this.userRepository = userRepository;
         this.outbox = outbox;
+        this.stockGate = stockGate;
+    }
+
+    /** The user's cart lines, sorted by product id (the same order checkout locks rows in). */
+    @Transactional(readOnly = true)
+    public List<CheckoutLine> checkoutLines(String email) {
+
+        return cartItemRepository.findCheckoutLines(email);
+    }
+
+    /** Exact stock from the database; used to (re)load the stock gate's counter. */
+    @Transactional(readOnly = true)
+    public int currentStock(Long productId) {
+        return productRepository.currentStock(productId);
     }
 
     /**
@@ -233,6 +250,9 @@ public class OrderService {
 
         for (OrderItem item : order.getItems()) {
             productRepository.releaseStock(item.getProduct().getId(), item.getQuantity());
+
+            // Stock went up, so the gate's counter is reloaded from the database after this commits
+            stockGate.forgetAfterCommit(item.getProduct().getId());
         }
     }
 

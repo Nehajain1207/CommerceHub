@@ -4,7 +4,9 @@ import com.neha.commercehub.order.OrderDtos.CheckoutRequest;
 import com.neha.commercehub.payment.PaymentDtos.CheckoutResponse;
 import com.neha.commercehub.payment.PaymentDtos.PaymentInfo;
 import com.neha.commercehub.payment.PaymentDtos.VerifyRequest;
+import com.neha.commercehub.scaling.RateLimiter;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Duration;
 import java.util.Map;
 
 @RestController
@@ -23,15 +26,29 @@ import java.util.Map;
 public class PaymentController {
 
     private final PaymentService paymentService;
+    private final RateLimiter rateLimiter;
+    private final int checkoutLimit;
+    private final Duration checkoutWindow;
 
-    public PaymentController(PaymentService paymentService) {
+    public PaymentController(PaymentService paymentService,
+                             RateLimiter rateLimiter,
+                             @Value("${app.ratelimit.checkout.limit:5}") int checkoutLimit,
+                             @Value("${app.ratelimit.checkout.window-seconds:10}") long checkoutWindowSeconds) {
+
         this.paymentService = paymentService;
+        this.rateLimiter = rateLimiter;
+        this.checkoutLimit = checkoutLimit;
+        this.checkoutWindow = Duration.ofSeconds(checkoutWindowSeconds);
     }
 
     /** Turns the cart into an order that is waiting for payment. */
     @PostMapping("/checkout")
     @ResponseStatus(HttpStatus.CREATED)
     public CheckoutResponse checkout(@Valid @RequestBody CheckoutRequest request, Authentication authentication) {
+        // One customer (or a bot using their account) cannot hammer checkout
+        rateLimiter.check("checkout", authentication.getName(), checkoutLimit, checkoutWindow,
+                "Too many checkout attempts. Please wait a few seconds and try again.");
+
         return paymentService.checkout(authentication.getName(), request.shippingAddress());
     }
 

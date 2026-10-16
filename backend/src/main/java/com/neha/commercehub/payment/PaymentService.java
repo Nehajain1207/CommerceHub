@@ -3,13 +3,17 @@ package com.neha.commercehub.payment;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.neha.commercehub.common.BadRequestException;
+import com.neha.commercehub.common.InsufficientStockException;
+import com.neha.commercehub.common.ServiceBusyException;
 import com.neha.commercehub.common.NotFoundException;
 import com.neha.commercehub.order.Order;
 import com.neha.commercehub.order.OrderDtos.OrderResponse;
 import com.neha.commercehub.order.OrderService;
+import com.neha.commercehub.order.CheckoutLine;
 import com.neha.commercehub.order.OrderStatus;
 import com.neha.commercehub.payment.PaymentDtos.CheckoutResponse;
 import com.neha.commercehub.payment.PaymentDtos.PaymentInfo;
+import com.neha.commercehub.scaling.StockGate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +21,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 
 /**
@@ -40,6 +48,9 @@ public class PaymentService {
     private final ObjectMapper objectMapper;
     private final String webhookSecret;
     private final long paymentWindowMinutes;
+    private final StockGate stockGate;
+    private final Semaphore orderSlots;
+    private final long orderSlotWaitMillis;
 
     public PaymentService(OrderService orderService,
                           PaymentRecords paymentRecords,
@@ -47,7 +58,10 @@ public class PaymentService {
                           PaymentGateway gateway,
                           ObjectMapper objectMapper,
                           @Value("${razorpay.webhook-secret}") String webhookSecret,
-                          @Value("${app.payment.window-minutes}") long paymentWindowMinutes) {
+                          @Value("${app.payment.window-minutes}") long paymentWindowMinutes,
+                          StockGate stockGate,
+                          @Value("${app.checkout.max-concurrent-orders:8}") int maxConcurrentOrders,
+                          @Value("${app.checkout.slot-wait-millis:10000}") long orderSlotWaitMillis) {
 
         this.orderService = orderService;
         this.paymentRecords = paymentRecords;
@@ -56,6 +70,9 @@ public class PaymentService {
         this.objectMapper = objectMapper;
         this.webhookSecret = webhookSecret;
         this.paymentWindowMinutes = paymentWindowMinutes;
+        this.stockGate = stockGate;
+        this.orderSlots = new Semaphore(maxConcurrentOrders, true);
+        this.orderSlotWaitMillis = orderSlotWaitMillis;
     }
 
     /**
@@ -64,7 +81,54 @@ public class PaymentService {
      */
     public CheckoutResponse checkout(String email, String shippingAddress) {
 
-        OrderResponse order = orderService.checkout(email, shippingAddress);
+        // 1. Fast stock check in Redis (see StockGate). In a flash sale most customers are
+        //    answered "sold out" here, without opening a database transaction at all.
+        List<CheckoutLine> taken = new ArrayList<>();
+
+        for (CheckoutLine line : orderService.checkoutLines(email)) {
+
+            StockGate.Result result = stockGate.tryTake(
+                    line.productId(), line.quantity(), () -> orderService.currentStock(line.productId()));
+
+            if (result == StockGate.Result.NOT_ENOUGH) {
+                giveBack(taken);
+                throw new InsufficientStockException(line.productName());
+            }
+
+            if (result == StockGate.Result.TAKEN) {
+                taken.add(line);
+            }
+        }
+
+        // 2. The real order, with the exact stock update in the database.
+        //    Bulkhead: only a few order transactions run at once on this server. Customers
+        //    with the same hot product would only queue on the same row lock anyway, and
+        //    while they wait HERE they hold no database connection, so connections stay
+        //    free for everyone else (browsing, carts, the stock gate).
+        OrderResponse order;
+
+        try {
+            if (!orderSlots.tryAcquire(orderSlotWaitMillis, TimeUnit.MILLISECONDS)) {
+                throw new ServiceBusyException("Checkout is very busy right now. Please try again in a moment.");
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            giveBack(taken);
+            throw new ServiceBusyException("Checkout was interrupted. Please try again.");
+        } catch (RuntimeException ex) {
+            giveBack(taken);
+            throw ex;
+        }
+
+        try {
+            order = orderService.checkout(email, shippingAddress);
+        } catch (RuntimeException ex) {
+            giveBack(taken);
+            throw ex;
+        } finally {
+            orderSlots.release();
+        }
+
         long amountPaise = order.total().movePointRight(2).longValueExact();
 
         try {
@@ -82,6 +146,13 @@ public class PaymentService {
             orderService.cancelUnpaidById(saved.getId());
 
             throw new BadRequestException("Payment could not be started, so the order was not placed. Please try again.");
+        }
+    }
+
+    private void giveBack(List<CheckoutLine> lines) {
+
+        for (CheckoutLine line : lines) {
+            stockGate.giveBack(line.productId(), line.quantity());
         }
     }
 

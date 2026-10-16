@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -31,6 +32,27 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InsufficientStockException.class)
     public ResponseEntity<ApiError> insufficientStock(InsufficientStockException ex) {
         return build(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ApiError> tooManyRequests(TooManyRequestsException ex) {
+        return build(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+    }
+
+    /**
+     * Every database connection was busy for longer than the pool's wait limit.
+     * Under extreme load we answer quickly with 503 ("try again") instead of letting
+     * requests pile up and time out.
+     */
+    @ExceptionHandler(CannotCreateTransactionException.class)
+    public ResponseEntity<ApiError> overloaded(CannotCreateTransactionException ex) {
+        log.warn("No database connection available: {}", ex.getMostSpecificCause().getMessage());
+        return build(HttpStatus.SERVICE_UNAVAILABLE, "The shop is very busy right now. Please try again in a moment.");
+    }
+
+    @ExceptionHandler(ServiceBusyException.class)
+    public ResponseEntity<ApiError> busy(ServiceBusyException ex) {
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
     }
 
     @ExceptionHandler(AccessDeniedException.class)

@@ -52,6 +52,10 @@ public class RazorpayGateway implements PaymentGateway {
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
+            if (response.statusCode() / 100 == 5 || response.statusCode() == 429) {
+                throw new TransientGatewayException("Razorpay answered " + response.statusCode());
+            }
+
             if (response.statusCode() / 100 != 2) {
                 throw new PaymentGatewayException(
                         "Razorpay answered " + response.statusCode() + ": " + response.body());
@@ -69,6 +73,15 @@ public class RazorpayGateway implements PaymentGateway {
         } catch (PaymentGatewayException ex) {
 
             throw ex;
+
+        } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+
+            throw new PaymentGatewayException("Could not read Razorpay's answer: " + ex.getMessage());
+
+        } catch (java.io.IOException ex) {
+
+            // Timeouts and dropped connections: worth retrying
+            throw new TransientGatewayException("Could not reach Razorpay: " + ex.getMessage());
 
         } catch (InterruptedException ex) {
 
